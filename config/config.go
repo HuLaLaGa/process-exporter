@@ -34,8 +34,9 @@ type (
 	}
 
 	cmdlineMatcher struct {
-		regexes  []*regexp.Regexp
-		captures map[string]string
+		excludeRegexes []*regexp.Regexp
+		regexes        []*regexp.Regexp
+		captures       map[string]string
 	}
 
 	andMatcher []Matcher
@@ -154,12 +155,23 @@ func (m *exeMatcher) Match(nacl common.ProcAttributes) bool {
 }
 
 func (m *cmdlineMatcher) Match(nacl common.ProcAttributes) bool {
-	for _, regex := range m.regexes {
+	if m.captures == nil {
+		return false
+	}
+	for _, regex := range m.excludeRegexes {
 		captures := regex.FindStringSubmatch(strings.Join(nacl.Cmdline, " "))
-		if m.captures == nil {
+
+		subexpNames := regex.SubexpNames()
+
+		if len(subexpNames) == len(captures) {
 			return false
 		}
+	}
+	for _, regex := range m.regexes {
+		captures := regex.FindStringSubmatch(strings.Join(nacl.Cmdline, " "))
+
 		subexpNames := regex.SubexpNames()
+
 		if len(subexpNames) != len(captures) {
 			return false
 		}
@@ -225,7 +237,7 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 
 		if matcher.CommRules != nil {
 			comms := make(map[string]struct{})
-			excludComms := make(map[string]struct{})
+			excludeComms := make(map[string]struct{})
 			for _, c := range matcher.CommRules {
 				if len(c) == 0 {
 					continue
@@ -233,12 +245,12 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 				operate := comms
 				if strings.HasPrefix(c, "!") {
 					c = c[1:]
-					operate = excludComms
+					operate = excludeComms
 				}
 				operate[c] = struct{}{}
 			}
-			if len(excludComms) > 0 {
-				matchers = append(matchers, &notMatcher{&commMatcher{excludComms}})
+			if len(excludeComms) > 0 {
+				matchers = append(matchers, &notMatcher{&commMatcher{excludeComms}})
 			}
 			if len(comms) > 0 {
 				matchers = append(matchers, &commMatcher{comms})
@@ -246,7 +258,7 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 		}
 		if matcher.ExeRules != nil {
 			exes := make(map[string]string)
-			excludExes := make(map[string]string)
+			excludeExes := make(map[string]string)
 			for _, e := range matcher.ExeRules {
 				if len(e) == 0 {
 					continue
@@ -254,7 +266,7 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 				operate := exes
 				if strings.HasPrefix(e, "!") {
 					e = e[1:]
-					operate = excludExes
+					operate = excludeExes
 				}
 				if strings.Contains(e, "/") {
 					operate[filepath.Base(e)] = e
@@ -262,8 +274,8 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 					operate[e] = ""
 				}
 			}
-			if len(excludExes) > 0 {
-				matchers = append(matchers, &notMatcher{&exeMatcher{excludExes}})
+			if len(excludeExes) > 0 {
+				matchers = append(matchers, &notMatcher{&exeMatcher{excludeExes}})
 			}
 			if len(exes) > 0 {
 				matchers = append(matchers, &exeMatcher{exes})
@@ -271,16 +283,26 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 		}
 		if matcher.CmdlineRules != nil {
 			var rs []*regexp.Regexp
+			var excludeRs []*regexp.Regexp
 			for _, c := range matcher.CmdlineRules {
+				if len(c) == 0 {
+					continue
+				}
+				operate := &rs
+				if strings.HasPrefix(c, "!") {
+					c = c[1:]
+					operate = &excludeRs
+				}
 				r, err := regexp.Compile(c)
 				if err != nil {
 					return nil, fmt.Errorf("bad cmdline regex %q: %v", c, err)
 				}
-				rs = append(rs, r)
+				*operate = append(*operate, r)
 			}
 			matchers = append(matchers, &cmdlineMatcher{
-				regexes:  rs,
-				captures: make(map[string]string),
+				excludeRegexes: excludeRs,
+				regexes:        rs,
+				captures:       make(map[string]string),
 			})
 		}
 		if len(matchers) == 0 {

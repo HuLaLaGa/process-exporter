@@ -108,10 +108,17 @@ process_names:
   - comm:
     - "!cat"
     name: "{{.StartTime}}"
+  - cmdline:
+    - "!echo (?P<ExcludeArgs>.*)"
+    name: "{{.ExeBase}}"
+  - cmdline:
+    - "!echo (?P<ExcludeArgs>.*)"
+    - "cat (?P<IncludeArgs>.*)"
+    name: "{{.Matches.ExcludeArgs}} {{.Matches.IncludeArgs}}"
 `
 	cfg, err := GetConfig(yml, false)
 	c.Assert(err, IsNil)
-	c.Check(cfg.MatchNamers.matchers, HasLen, 3)
+	c.Check(cfg.MatchNamers.matchers, HasLen, 5)
 
 	postgres := common.ProcAttributes{Name: "postmaster", Cmdline: []string{"/usr/bin/postmaster", "-D", "/data/pg"}}
 	found, name := cfg.MatchNamers.matchers[0].MatchAndName(postgres)
@@ -141,4 +148,24 @@ process_names:
 	found, name = cfg.MatchNamers.matchers[2].MatchAndName(cat)
 	c.Check(found, Equals, false)
 	c.Check(name, Equals, "")
+
+	echo := common.ProcAttributes{Name: "echo", Cmdline: []string{"/bin/echo", "$FILE"}}
+	found, name = cfg.MatchNamers.matchers[3].MatchAndName(echo)
+	c.Check(found, Equals, false)
+	c.Check(name, Equals, "")
+
+	cat = common.ProcAttributes{Name: "cat", Cmdline: []string{"/bin/cat", "$FILE_PATH"}}
+	found, name = cfg.MatchNamers.matchers[3].MatchAndName(cat)
+	c.Check(found, Equals, true)
+	c.Check(name, Equals, "cat")
+
+	cat = common.ProcAttributes{Name: "cat", Cmdline: []string{"/bin/tail", "$FILE_PATH"}}
+	found, name = cfg.MatchNamers.matchers[4].MatchAndName(cat)
+	c.Check(found, Equals, false)
+	c.Check(name, Equals, "")
+
+	cat = common.ProcAttributes{Name: "cat", Cmdline: []string{"/bin/cat", "$FILE_PATH"}}
+	found, name = cfg.MatchNamers.matchers[4].MatchAndName(cat)
+	c.Check(found, Equals, true)
+	c.Check(name, Equals, "<no value> $FILE_PATH")
 }
