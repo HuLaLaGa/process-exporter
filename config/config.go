@@ -40,6 +40,10 @@ type (
 
 	andMatcher []Matcher
 
+	notMatcher struct {
+		m Matcher
+	}
+
 	templateNamer struct {
 		template *template.Template
 	}
@@ -176,6 +180,10 @@ func (m andMatcher) Match(nacl common.ProcAttributes) bool {
 	return true
 }
 
+func (m notMatcher) Match(nacl common.ProcAttributes) bool {
+	return !m.m.Match(nacl)
+}
+
 type Config struct {
 	MatchNamers FirstMatcher
 }
@@ -217,21 +225,49 @@ func (r MatcherRules) ToConfig() (*Config, error) {
 
 		if matcher.CommRules != nil {
 			comms := make(map[string]struct{})
+			excludComms := make(map[string]struct{})
 			for _, c := range matcher.CommRules {
-				comms[c] = struct{}{}
+				if len(c) == 0 {
+					continue
+				}
+				operate := comms
+				if strings.HasPrefix(c, "!") {
+					c = c[1:]
+					operate = excludComms
+				}
+				operate[c] = struct{}{}
 			}
-			matchers = append(matchers, &commMatcher{comms})
+			if len(excludComms) > 0 {
+				matchers = append(matchers, &notMatcher{&commMatcher{excludComms}})
+			}
+			if len(comms) > 0 {
+				matchers = append(matchers, &commMatcher{comms})
+			}
 		}
 		if matcher.ExeRules != nil {
 			exes := make(map[string]string)
+			excludExes := make(map[string]string)
 			for _, e := range matcher.ExeRules {
+				if len(e) == 0 {
+					continue
+				}
+				operate := exes
+				if strings.HasPrefix(e, "!") {
+					e = e[1:]
+					operate = excludExes
+				}
 				if strings.Contains(e, "/") {
-					exes[filepath.Base(e)] = e
+					operate[filepath.Base(e)] = e
 				} else {
-					exes[e] = ""
+					operate[e] = ""
 				}
 			}
-			matchers = append(matchers, &exeMatcher{exes})
+			if len(excludExes) > 0 {
+				matchers = append(matchers, &notMatcher{&exeMatcher{excludExes}})
+			}
+			if len(exes) > 0 {
+				matchers = append(matchers, &exeMatcher{exes})
+			}
 		}
 		if matcher.CmdlineRules != nil {
 			var rs []*regexp.Regexp
